@@ -1,0 +1,20 @@
+server:
+  port: 8011
+spring:
+  datasource:
+    driver-class-name: com.mysql.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/dbtemp?characterEncoding=utf8&useSSL=true
+    username: root
+    password: 19970302
+
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+  mail:
+    protocol: smtp
+    host: smtp.126.com
+    username: Hey_net@126.com
+    password: 1a2s3d4f
+    default-encoding: UTF-8
