@@ -2,21 +2,20 @@ package com.sample.service;
 
 import com.sample.DAO.UserRepository;
 import com.sample.bean.User;
-import net.sf.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.stereotype.Service;
 
 import javax.mail.internet.MimeMessage;
-import java.util.List;
-import java.util.Random;
-import java.util.UUID;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-
+@EnableAsync
 @Service
 public class LoginService {
 
@@ -27,29 +26,65 @@ public class LoginService {
     @Autowired
     JavaMailSender mailSender;
 
+    @Autowired
+    private MailService mailService;
+
     @Value("${spring.mail.username}")
     private String sender;
 
     //登录
-    public Integer login(String mail,String password) {
-        if(!checkEmail(mail)) return -3; //邮箱格式错误
+    public Map<String,Object> login(String mail,String password) {
+        Map<String,Object> map = new HashMap<>();
+        if(!checkEmail(mail)){
+            map.put("status","no");
+            map.put("error","邮箱格式错误！");
+            return map;
+        }
         List<User> userList = userRepository.findByMail(mail);
-        System.out.println(userList.size());
-        if(userList.size()==0) return -2; //邮箱未注册
-//        if(userList.size()>1) return -1; //邮箱重复注册
+        if(userList.size()==0) {
+            map.put("status","no");
+            map.put("error","邮箱尚未注册！");
+            return map;
+        }
+
         User user=userList.get(0);
-        if(user.getActive()==0) return -1; //邮箱尚未被激活
-        if(user.getPassword().equals(password)) return 1; //登录成功
-        else return 0; //密码错误
+        if(user.getActive()==0) {
+            map.put("status","no");
+            map.put("error","邮箱尚未激活！");
+            return map;
+        }
+        if(user.getPassword().equals(password)) {
+            map.put("status","yes");
+            map.put("info","登录成功！");
+            return map;
+        }
+        else {
+            map.put("status","no");
+            map.put("error","密码错误！");
+            return map;
+        }
     }
 
     //注册
-    public Integer register(String username, String password,String mail) {
-        if(!checkEmail(mail)) return -2; //邮箱格式有问题
-        if(!checkPassword(password)) return -1;  //密码长度不在6到20
+    public Map<String,Object> register(String username, String password,String mail) {
+        Map<String,Object> map = new HashMap<>();
+        if(!checkEmail(mail)){
+            map.put("status","no");
+            map.put("error","邮箱格式错误！");
+            return map;
+        }
+        if(!checkPassword(password)) {
+            map.put("status","no");
+            map.put("error","密码长度不在6到20！");
+            return map;
+        }
 
         List<User> userListByMail=userRepository.findByMail(mail);
-        if(userListByMail.size()>0) return 0;//邮箱已被注册
+        if(userListByMail.size()>0) {
+            map.put("status","no");
+            map.put("error","邮箱已被注册！");
+            return map;
+        }
 
         User user=new User();
         user.setUsername(username);
@@ -60,84 +95,95 @@ public class LoginService {
         user.setToken(token);
         userRepository.save(user);
 
-        sendEmail(user.getId(),mail,token);
-        return 1;
+        System.out.println("before");
+        mailService.sendEmail(user.getId(),mail,token);
+        System.out.println("after");
+        map.put("status","yes");
+        map.put("info","注册成功！");
+        return map;
     }
 
     //激活
-    public Integer validate(Integer id, String token) {
+    public Map<String,Object> validate(Integer id, String token) {
 
+        Map<String,Object> map = new HashMap<>();
         User user=userRepository.findOne(id);
-        if(user==null) return -1; //用户不存在
-
+        if(user==null) {
+            map.put("status","no");
+            map.put("error","用户不存在！");
+            return map;
+        }
         String userToken = user.getToken();
         if(userToken.equals(token)){
             user.setActive(1);
             userRepository.save(user);
-            return 1;//激活成功
+            map.put("status","yes");
+            map.put("info","激活成功！");
+            return map;
         }
         else {
-            return 0;//激活失败
+            map.put("status","no");
+            map.put("error","激活失败！");
+            return map;
         }
     }
 
     //忘记密码
-    public Integer reset(String mail) {
+    public Map<String,Object> forget(String mail) {
+
+        Map<String,Object> map = new HashMap<>();
+        if(!checkEmail(mail)){
+            map.put("status","no");
+            map.put("error","邮箱格式错误！");
+            return map;
+        }
         List<User> userListByMail=userRepository.findByMail(mail);
-        if(userListByMail.size()==0) return -1; //邮箱未被注册
+        if(userListByMail.size()==0) {
+            map.put("status","no");
+            map.put("error","邮箱未被注册！");
+            return map;
+        }
 
         User user=new User();
         user=userListByMail.get(0);
 
         String password=createPassWord((int)(Math.random()*100),10);
-        sendEmailForPassword(mail,password);
+        mailService.sendEmailForPassword(mail,password);
         user.setPassword(password);
         userRepository.save(user);
-        return 1; //邮件已发送
+        map.put("status","yes");
+        map.put("info","邮件已发送！");
+        return map;
     }
 
-    public void sendEmail(Integer id,String mail,String token)
-    {
-        try
-        {
-            final MimeMessage mimeMessage = this.mailSender.createMimeMessage();
-            final MimeMessageHelper message = new MimeMessageHelper(mimeMessage);
-            message.setFrom("Hey_Net@126.com");
-            message.setTo(mail);
-            message.setSubject("邮箱验证");
+    //修改密码
+    public Map<String,Object> reset(String mail,String password,String newpassword) {
+        Map<String,Object> map = new HashMap<>();
+        map=login(mail,password);
+        if(map.get("status").equals("no")){
+            return map;
+        }
+        if(!checkPassword(newpassword)) {
+            map.put("status","no");
+            map.put("error","密码长度不在6到20！");
+            map.remove("info");
+            return map;
+        }
+        else {
+            List<User> userList = userRepository.findByMail(mail);
+            User user=userList.get(0);
+            user.setPassword(newpassword);
+            userRepository.save(user);
 
-            String link = "http://localhost:8080/#/validate/" + id.toString()+'/'+token;
-            message.setText(link);
-            this.mailSender.send(mimeMessage);
-            System.out.println("bang!");
+            map.put("status","yes");
+            map.put("info","修改密码成功！");
+            return map;
         }
-        catch(Exception ex)
-        {
-            System.out.println("wrong!");
-            System.out.println(token);
-        }
+
     }
 
-    public void sendEmailForPassword(String mail,String password)
-    {
-        try
-        {
-            final MimeMessage mimeMessage = this.mailSender.createMimeMessage();
-            final MimeMessageHelper message = new MimeMessageHelper(mimeMessage);
-            message.setFrom("Hey_Net@126.com");
-            message.setTo(mail);
-            message.setSubject("找回密码");
 
-            String text = "重置密码为"+password;
-            message.setText(text);
-            this.mailSender.send(mimeMessage);
-            System.out.println("bang!");
-        }
-        catch(Exception ex)
-        {
-            System.out.println("wrong!");
-        }
-    }
+
 
     //生成token
     public String getTokenOfSignUp(User user){
